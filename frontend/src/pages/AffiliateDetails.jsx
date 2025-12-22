@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { 
   ArrowLeft, Calendar, TrendingUp, User, Mail, Phone, 
-  MessageCircle, Wallet, History, Tag, Users, Filter, DollarSign
+  MessageCircle, Wallet, History, Tag, Users, DollarSign, Filter, RefreshCw
 } from "lucide-react";
 import KpiGrid from "../components/KpiGrid";
 import FinancialChart from "../components/FinancialChart";
@@ -9,7 +9,16 @@ import VerdictBadge from "../components/VerdictBadge";
 import { calculateKpis } from "../utils/metrics";
 import { getAffiliateVerdict } from "../utils/verdict";
 
-export default function AffiliateDetails({ affiliate, onBack, dateFrom, dateTo }) {
+export default function AffiliateDetails({ affiliate, onBack, dateFrom: initialDateFrom, dateTo: initialDateTo }) {
+  // --- ESTADOS DE DATA (LOCAL) ---
+  // Iniciam com o que veio do global, mas podem ser mudados aqui
+  const [localDateFrom, setLocalDateFrom] = useState(initialDateFrom);
+  const [localDateTo, setLocalDateTo] = useState(initialDateTo);
+  
+  // Estes são os que realmente disparam a busca (só mudam quando clica em filtrar)
+  const [searchFrom, setSearchFrom] = useState(initialDateFrom);
+  const [searchTo, setSearchTo] = useState(initialDateTo);
+
   const [history, setHistory] = useState([]);
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,9 +26,6 @@ export default function AffiliateDetails({ affiliate, onBack, dateFrom, dateTo }
   const [activeTab, setActiveTab] = useState("overview"); 
   const [chartMetric, setChartMetric] = useState("profit");
   const [tableFilter, setTableFilter] = useState("all"); 
-  
-  // --- NOVO: COTAÇÃO DO DÓLAR (Editável) ---
-  // Começa com 5.50, mas você pode mudar na tela para bater o valor exato
   const [exchangeRate, setExchangeRate] = useState(5.50); 
 
   const verdict = getAffiliateVerdict(affiliate);
@@ -31,21 +37,25 @@ export default function AffiliateDetails({ affiliate, onBack, dateFrom, dateTo }
     return date.toLocaleDateString('pt-BR');
   };
 
-  // --- FUNÇÃO DE CONVERSÃO PODEROSA ---
   const formatMoney = (valueInUSD) => {
-    if (!valueInUSD) return "R$ 0,00";
-    // Multiplica pelo valor que você digitou no input
+    if (!valueInUSD && valueInUSD !== 0) return "-";
     const valueInBRL = valueInUSD * exchangeRate;
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valueInBRL);
   };
 
-  // 1. CARREGA GRÁFICO
+  // --- FUNÇÃO PARA APLICAR NOVA DATA ---
+  const handleDateUpdate = () => {
+    setSearchFrom(localDateFrom);
+    setSearchTo(localDateTo);
+  };
+
+  // 1. CARREGA GRÁFICO (Depende de searchFrom/To)
   useEffect(() => {
     async function fetchHistory() {
       if (!affiliate.id) return;
       try {
         setLoading(true);
-        const url = `http://localhost:3333/api/affiliates/${affiliate.id}/history?date_from=${dateFrom}&date_to=${dateTo}`;
+        const url = `http://localhost:3333/api/affiliates/${affiliate.id}/history?date_from=${searchFrom}&date_to=${searchTo}`;
         const res = await fetch(url);
         const data = await res.json();
 
@@ -53,7 +63,6 @@ export default function AffiliateDetails({ affiliate, onBack, dateFrom, dateTo }
           const formatted = data.history.map(h => ({
             ...h,
             name: new Date(h.name).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
-            // Convertemos aqui também para o gráfico ficar em Reais
             Lucro: (Number(h.net_pnl) || 0) * exchangeRate, 
             Depositos: Number(h.ftds) || 0,
             Registros: Number(h.registrations) || 0
@@ -63,44 +72,42 @@ export default function AffiliateDetails({ affiliate, onBack, dateFrom, dateTo }
       } catch (err) { console.error(err); } finally { setLoading(false); }
     }
     fetchHistory();
-  }, [affiliate, dateFrom, dateTo, exchangeRate]); // Recarrega se mudar a cotação
+  }, [affiliate, searchFrom, searchTo, exchangeRate]);
 
-  // 2. CARREGA JOGADORES
+  // 2. CARREGA RELATÓRIO DE REGISTROS (Depende de searchFrom/To)
   useEffect(() => {
     if (activeTab === 'overview') return;
     async function fetchPlayers() {
       if (!affiliate.id) return;
       try {
         setLoadingPlayers(true);
-        const url = `http://localhost:3333/api/affiliates/${affiliate.id}/players?date_from=${dateFrom}&date_to=${dateTo}`;
+        const url = `http://localhost:3333/api/affiliates/${affiliate.id}/players?date_from=${searchFrom}&date_to=${searchTo}`;
         const res = await fetch(url);
         const data = await res.json();
-        
-        const validPlayers = (data.players || []).filter(p => p.registeredAt || p.depositedAt || p.ftdAmount > 0);
-        setPlayers(validPlayers);
+        setPlayers(data.players || []);
       } catch (err) { console.error(err); } finally { setLoadingPlayers(false); }
     }
     fetchPlayers();
-  }, [affiliate, activeTab, dateFrom, dateTo]);
+  }, [affiliate, activeTab, searchFrom, searchTo]);
 
-  const cleanPhone = (phone) => phone ? phone.replace(/\D/g, '') : '';
+  // Filtros
   const countNewRegs = players.filter(p => p.registeredAt).length;
-  const countFtds = players.filter(p => p.ftdAmount > 0 || p.depositedAt).length;
+  const countFtds = players.filter(p => p.ftdDate).length; // Usando ftdDate que vem do relatório oficial
 
   const filteredList = players.filter(p => {
     if (tableFilter === "regs") return p.registeredAt; 
-    if (tableFilter === "ftds") return p.ftdAmount > 0 || p.depositedAt; 
+    if (tableFilter === "ftds") return p.ftdDate; 
     return true; 
   });
 
   return (
     <div className="space-y-6 animate-fade-in">
       
-      {/* 1. CABEÇALHO COM CONTROLE DE CÂMBIO */}
+      {/* 1. CABEÇALHO */}
       <div className="flex flex-col xl:flex-row gap-6 border-b border-[#2a2a2a] pb-6 justify-between">
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-4">
-            <button onClick={onBack} className="p-2 hover:bg-[#252525] rounded-full text-gray-400 hover:text-white transition-colors"><ArrowLeft size={24} /></button>
+            <button onClick={onBack} className="p-2 hover:bg-[#252525] rounded-full text-gray-400 hover:text-white transition-colors" title="Voltar"><ArrowLeft size={24} /></button>
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-bold text-white flex items-center gap-3">
@@ -108,31 +115,54 @@ export default function AffiliateDetails({ affiliate, onBack, dateFrom, dateTo }
                 </h1>
                 <VerdictBadge verdict={verdict} />
               </div>
-              <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-400">
-                <span className="flex items-center gap-1"><User size={14} /> {affiliate.fullName || "Nome não cadastrado"}</span>
-                {affiliate.label && <span className="flex items-center gap-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded text-xs"><Tag size={10} /> {affiliate.label}</span>}
-                <span className="flex items-center gap-1 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded bg-blue-500/5 text-xs"><Calendar size={12} /> {new Date(dateFrom).toLocaleDateString()} - {new Date(dateTo).toLocaleDateString()}</span>
+              
+              <div className="flex flex-wrap items-center gap-4 mt-3">
+                {/* INFO USUÁRIO */}
+                <span className="flex items-center gap-1 text-sm text-gray-400"><User size={14} /> {affiliate.fullName || "Nome não cadastrado"}</span>
+                
+                {/* --- SELETOR DE DATA LOCAL (NOVIDADE) --- */}
+                <div className="flex items-center gap-2 bg-[#151515] p-1 rounded-lg border border-[#333]">
+                  <Calendar size={14} className="text-blue-500 ml-1"/>
+                  <input 
+                    type="date" 
+                    value={localDateFrom}
+                    onChange={(e) => setLocalDateFrom(e.target.value)}
+                    className="bg-transparent text-white text-xs border-none outline-none w-24"
+                  />
+                  <span className="text-gray-500 text-xs">até</span>
+                  <input 
+                    type="date" 
+                    value={localDateTo}
+                    onChange={(e) => setLocalDateTo(e.target.value)}
+                    className="bg-transparent text-white text-xs border-none outline-none w-24"
+                  />
+                  <button 
+                    onClick={handleDateUpdate}
+                    className="bg-blue-600 hover:bg-blue-700 text-white p-1 rounded-md transition-colors"
+                    title="Atualizar Período"
+                  >
+                    <RefreshCw size={12} />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-          
-          {/* INPUT DE CÂMBIO (A MÁGICA ACONTECE AQUI) */}
-          <div className="flex items-center gap-3 bg-[#151515] p-2 rounded-lg border border-[#333] w-fit">
-            <div className="flex items-center gap-1 text-green-500 text-sm font-bold">
-              <DollarSign size={14}/> <span>Cotação USD:</span>
+
+          <div className="flex flex-wrap gap-2">
+            {/* COTAÇÃO */}
+            <div className="flex items-center gap-2 bg-[#151515] px-3 py-2 rounded-lg border border-[#333]">
+              <DollarSign size={14} className="text-green-500"/>
+              <span className="text-xs text-gray-400">USD:</span>
+              <input type="number" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} step="0.01" className="bg-transparent text-white text-sm w-12 border-none outline-none font-bold" />
             </div>
-            <input 
-              type="number" 
-              value={exchangeRate}
-              onChange={(e) => setExchangeRate(e.target.value)}
-              step="0.01"
-              className="bg-[#222] text-white text-sm w-16 px-2 py-1 rounded border border-[#444] focus:border-green-500 outline-none"
-            />
-            <span className="text-xs text-gray-500">Ajuste para bater o valor</span>
+            
+            {/* CONTATOS */}
+            {affiliate.phone && <a href={`https://wa.me/${affiliate.phone.replace(/\D/g, '')}`} target="_blank" className="flex items-center gap-2 px-3 py-2 bg-green-500/10 text-green-400 border border-green-500/20 rounded-lg hover:bg-green-500/20 text-sm font-medium"><MessageCircle size={16} /> WhatsApp</a>}
+            {affiliate.email && <a href={`mailto:${affiliate.email}`} className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 text-sm font-medium"><Mail size={16} /> Email</a>}
           </div>
         </div>
         
-        {/* WIDGETS FINANCEIROS (AGORA CONVERTIDOS) */}
+        {/* WIDGETS FINANCEIROS */}
         <div className="flex gap-4 shrink-0 mt-4 xl:mt-0">
           <div className="bg-[#1c1c1c] border border-[#2a2a2a] p-4 rounded-xl min-w-[160px] flex flex-col justify-center shadow-lg">
             <div className="flex items-center gap-2 text-gray-400 text-[10px] uppercase font-bold mb-1"><Wallet size={12} className="text-yellow-500"/> Saldo a Pagar</div>
@@ -147,12 +177,11 @@ export default function AffiliateDetails({ affiliate, onBack, dateFrom, dateTo }
 
       <div className="border-b border-[#2a2a2a] flex gap-6">
         <button onClick={() => setActiveTab('overview')} className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'overview' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>Visão Geral</button>
-        <button onClick={() => setActiveTab('players')} className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'players' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>Relatório de Jogadores</button>
+        <button onClick={() => setActiveTab('players')} className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'players' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>Relatório de Registros</button>
       </div>
 
       {activeTab === 'overview' ? (
         <div className="space-y-6 animate-fade-in">
-          {/* KPI GRID NÃO FOI ALTERADO POIS USA DADOS AGREGADOS, MAS O GRÁFICO SIM */}
           <KpiGrid kpis={calculateKpis([affiliate])} />
           <div className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-xl p-6 shadow-lg">
             <div className="flex items-center justify-between mb-6">
@@ -163,39 +192,65 @@ export default function AffiliateDetails({ affiliate, onBack, dateFrom, dateTo }
                   ))}
               </div>
             </div>
-            {loading ? <div className="h-[300px] flex items-center justify-center text-gray-500">Carregando...</div> : history.length > 0 ? <FinancialChart data={history} activeMetric={chartMetric} /> : <div className="h-[300px] flex items-center justify-center text-gray-500 border border-dashed border-[#333] rounded-lg">Sem dados.</div>}
+            {loading ? <div className="h-[300px] flex items-center justify-center text-gray-500">Carregando histórico...</div> : history.length > 0 ? <FinancialChart data={history} activeMetric={chartMetric} /> : <div className="h-[300px] flex items-center justify-center text-gray-500 border border-dashed border-[#333] rounded-lg">Sem dados neste período.</div>}
           </div>
         </div>
       ) : (
+        /* RELATÓRIO COMPLETO COM NOVOS FILTROS */
         <div className="space-y-4 animate-fade-in">
           <div className="flex flex-wrap gap-3">
-            <button onClick={() => setTableFilter("all")} className={`flex-1 p-3 rounded-xl border ${tableFilter === 'all' ? 'bg-[#252525] border-blue-500/50' : 'bg-[#1c1c1c] border-[#2a2a2a]'}`}><div className="text-xs text-gray-400">Total</div><div className="text-xl font-bold text-white">{players.length}</div></button>
-            <button onClick={() => setTableFilter("regs")} className={`flex-1 p-3 rounded-xl border ${tableFilter === 'regs' ? 'bg-purple-500/10 border-purple-500/50' : 'bg-[#1c1c1c] border-[#2a2a2a]'}`}><div className="text-xs text-purple-300">Novos</div><div className="text-xl font-bold text-purple-400">{countNewRegs}</div></button>
-            <button onClick={() => setTableFilter("ftds")} className={`flex-1 p-3 rounded-xl border ${tableFilter === 'ftds' ? 'bg-emerald-500/10 border-emerald-500/50' : 'bg-[#1c1c1c] border-[#2a2a2a]'}`}><div className="text-xs text-emerald-300">Pagantes</div><div className="text-xl font-bold text-emerald-400">{countFtds}</div></button>
+            <button onClick={() => setTableFilter("all")} className={`flex-1 min-w-[140px] p-3 rounded-xl border transition-all text-left ${tableFilter === 'all' ? 'bg-[#252525] border-blue-500/50' : 'bg-[#1c1c1c] border-[#2a2a2a] hover:border-[#333]'}`}>
+              <div className="text-xs text-gray-400 mb-1">Total Registrados</div>
+              <div className="text-xl font-bold text-white">{players.length}</div>
+            </button>
+            <button onClick={() => setTableFilter("ftds")} className={`flex-1 min-w-[140px] p-3 rounded-xl border transition-all text-left ${tableFilter === 'ftds' ? 'bg-emerald-500/10 border-emerald-500/50' : 'bg-[#1c1c1c] border-[#2a2a2a] hover:border-[#333]'}`}>
+              <div className="text-xs text-emerald-300 mb-1">Com Depósito (FTD)</div>
+              <div className="text-xl font-bold text-emerald-400">{countFtds}</div>
+            </button>
           </div>
 
-          <div className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-lg">
-            {loadingPlayers ? <div className="p-20 text-center text-gray-500">Buscando jogadores...</div> : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-[#151515] text-xs uppercase font-semibold text-gray-400 border-b border-[#2a2a2a]">
-                    <tr><th className="px-6 py-4">ID</th><th className="px-6 py-4">País</th><th className="px-6 py-4 text-center">Data Registro</th><th className="px-6 py-4 text-center">Data 1º Depósito</th><th className="px-6 py-4 text-right">Valor FTD (Estimado)</th></tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#2a2a2a]">
-                    {filteredList.map((p, i) => (
-                      <tr key={i} className="hover:bg-[#252525]">
-                        <td className="px-6 py-4 text-white font-mono text-xs">{p.playerId}</td>
-                        <td className="px-6 py-4 text-gray-400">{p.country}</td>
-                        <td className="px-6 py-4 text-center text-gray-300">{p.registeredAt ? formatDate(p.registeredAt) : "-"}</td>
-                        <td className="px-6 py-4 text-center text-white">{p.depositedAt ? <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-xs">{formatDate(p.depositedAt)}</span> : "-"}</td>
-                        <td className="px-6 py-4 text-right">
-                          {p.ftdAmount > 0 ? <span className="text-emerald-400 font-bold">{formatMoney(p.ftdAmount)}</span> : <span className="text-gray-600">-</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          <div className="bg-[#1c1c1c] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-lg overflow-x-auto">
+            {loadingPlayers ? <div className="p-20 text-center text-gray-500">Buscando dados na Smartico...</div> : (
+              <table className="w-full text-xs text-left min-w-[1000px]">
+                <thead className="bg-[#151515] text-gray-400 border-b border-[#2a2a2a] uppercase font-semibold">
+                  <tr>
+                    <th className="px-4 py-3 sticky left-0 bg-[#151515]">ID / Usuário</th>
+                    <th className="px-4 py-3 text-center">Data Registro</th>
+                    <th className="px-4 py-3 text-center">Data FTD</th>
+                    <th className="px-4 py-3 text-right text-emerald-500">Valor FTD</th>
+                    <th className="px-4 py-3 text-center">Deps #</th>
+                    <th className="px-4 py-3 text-right text-red-400">Saques</th>
+                    <th className="px-4 py-3 text-right text-blue-400">Volume</th>
+                    <th className="px-4 py-3 text-right">Net P&L</th>
+                    <th className="px-4 py-3 text-center">Q-CPA</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#2a2a2a]">
+                  {filteredList.map((p, i) => (
+                    <tr key={i} className="hover:bg-[#252525] transition-colors">
+                      <td className="px-4 py-3 sticky left-0 bg-[#1c1c1c] font-mono text-white font-medium border-r border-[#2a2a2a]">
+                        <div>{p.playerId}</div>
+                        {p.username && p.username !== "-" && <div className="text-[10px] text-gray-500 truncate max-w-[100px]">{p.username}</div>}
+                      </td>
+                      <td className="px-4 py-3 text-center text-gray-400">{formatDate(p.registeredAt)}</td>
+                      <td className="px-4 py-3 text-center text-gray-300">{formatDate(p.ftdDate)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-emerald-400">{formatMoney(p.ftdAmount)}</td>
+                      <td className="px-4 py-3 text-center text-white">{p.depositsCount}</td>
+                      <td className="px-4 py-3 text-right text-red-300">{formatMoney(p.withdrawals)}</td>
+                      <td className="px-4 py-3 text-right text-blue-300">{formatMoney(p.volume)}</td>
+                      <td className={`px-4 py-3 text-right font-bold ${p.netPl >= 0 ? 'text-green-400' : 'text-red-500'}`}>
+                        {formatMoney(p.netPl)}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {p.qCpa === "Sim" ? <span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/30">SIM</span> : <span className="text-gray-600">-</span>}
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredList.length === 0 && (
+                    <tr><td colSpan="9" className="px-6 py-12 text-center text-gray-500">Nenhum jogador encontrado com este filtro.</td></tr>
+                  )}
+                </tbody>
+              </table>
             )}
           </div>
         </div>

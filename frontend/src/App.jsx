@@ -4,7 +4,7 @@ import Overview from "./pages/Overview";
 import Affiliates from "./pages/Affiliates";
 import AffiliateDetails from "./pages/AffiliateDetails";
 import FileUploader from "./components/FileUploader";
-import DateRangeFilter from "./components/DateRangeFilter"; // <--- Importe o novo componente
+import DateRangeFilter from "./components/DateRangeFilter"; 
 
 export default function App() {
   const [rows, setRows] = useState([]);
@@ -12,8 +12,11 @@ export default function App() {
   const [selectedAffiliate, setSelectedAffiliate] = useState(null);
   const [loading, setLoading] = useState(false);
   const [apiStatus, setApiStatus] = useState("idle");
+  
+  // --- NOVO: ESTADO GLOBAL DO TEMA ---
+  const [isDarkMode, setIsDarkMode] = useState(true);
 
-  // Estado Global de Datas (Padrão: Este Mês)
+  // Estado Global de Datas
   const [dateRange, setDateRange] = useState(() => {
     const today = new Date();
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -23,22 +26,15 @@ export default function App() {
     };
   });
 
-  // Função central para carregar dados
   const loadFromApi = async (from, to) => {
     setLoading(true);
     try {
-      // Atualiza o estado da data se vierem novos valores
       if (from && to) setDateRange({ from, to });
-      
       const qFrom = from || dateRange.from;
       const qTo = to || dateRange.to;
 
-      console.log(`Buscando dados de ${qFrom} até ${qTo}...`);
-
-      const response = await fetch(`http://localhost:3333/api/affiliates?date_from=${qFrom}&date_to=${qTo}`);
-      
+      const response = await fetch(`/api/affiliates?date_from=${qFrom}&date_to=${qTo}`);
       if (!response.ok) throw new Error("Falha na conexão");
-
       const data = await response.json();
 
       if (data.affiliates) {
@@ -53,7 +49,6 @@ export default function App() {
           balance: Number(item.balance || 0),
           payments: Number(item.payments || 0)
         }));
-
         setRows(normalized);
         setApiStatus("success");
       }
@@ -65,45 +60,47 @@ export default function App() {
     }
   };
 
-  // Carrega ao abrir a página
-  useEffect(() => {
-    loadFromApi();
-  }, []);
+  useEffect(() => { loadFromApi(); }, []);
 
   const renderContent = () => {
     if (selectedAffiliate) {
       return (
         <AffiliateDetails 
           affiliate={selectedAffiliate} 
-          // Passamos as datas globais para o detalhe usar no gráfico
           dateFrom={dateRange.from} 
           dateTo={dateRange.to}
-          onBack={() => setSelectedAffiliate(null)} 
+          onBack={() => setSelectedAffiliate(null)}
+          // PASSAMOS O TEMA PARA O DETALHE
+          isDarkMode={isDarkMode}
         />
       );
     }
 
-    if (activeTab === "overview") return <Overview rows={rows} />;
+    if (activeTab === "overview") return <Overview rows={rows} isDarkMode={isDarkMode} />;
     
     if (activeTab === "affiliates") {
       return (
         <Affiliates 
           rows={rows} 
           onSelectAffiliate={(aff) => setSelectedAffiliate(aff)} 
+          isDarkMode={isDarkMode}
         />
       );
     }
   };
 
   return (
-    <Layout activeTab={activeTab} onTabChange={(tab) => {
-      setActiveTab(tab);
-      setSelectedAffiliate(null);
-    }}>
+    // PASSAMOS O TEMA PARA O LAYOUT
+    <Layout 
+      activeTab={activeTab} 
+      onTabChange={(tab) => { setActiveTab(tab); setSelectedAffiliate(null); }}
+      isDarkMode={isDarkMode}
+      toggleTheme={() => setIsDarkMode(!isDarkMode)}
+    >
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white">Dashboard de Afiliados</h1>
+            <h1 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>Dashboard de Afiliados</h1>
             <div className="flex items-center gap-2 mt-1">
               {loading ? (
                 <span className="text-yellow-500 text-sm animate-pulse">● Atualizando dados...</span>
@@ -115,18 +112,14 @@ export default function App() {
             </div>
           </div>
           
-          {/* Seletor de Data e Upload */}
           <div className="flex flex-col sm:flex-row gap-3">
             <DateRangeFilter 
               initialDateFrom={dateRange.from}
               initialDateTo={dateRange.to}
-              onFilter={(from, to) => loadFromApi(from, to)} // Recarrega ao mudar data
+              onFilter={(from, to) => loadFromApi(from, to)}
+              isDarkMode={isDarkMode} // Se precisar passar estilo
             />
-            <FileUploader onLoad={(data) => {
-              setRows(data);
-              setApiStatus("manual");
-              setActiveTab("overview");
-            }} />
+            <FileUploader onLoad={(data) => { setRows(data); setApiStatus("manual"); setActiveTab("overview"); }} />
           </div>
         </div>
 
@@ -134,19 +127,14 @@ export default function App() {
           {rows.length > 0 ? (
             renderContent()
           ) : (
-            <div className="flex flex-col items-center justify-center p-20 bg-[#1c1c1c] rounded-xl border border-[#2a2a2a] text-center mt-6">
+            <div className={`flex flex-col items-center justify-center p-20 rounded-xl border text-center mt-6 ${isDarkMode ? 'bg-[#1c1c1c] border-[#2a2a2a]' : 'bg-white border-gray-200'}`}>
               {loading ? (
                 <div className="flex flex-col items-center">
                   <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                  <p className="text-white">Carregando dados ({dateRange.from} a {dateRange.to})...</p>
+                  <p className={isDarkMode ? 'text-white' : 'text-gray-600'}>Carregando dados...</p>
                 </div>
               ) : (
-                <>
-                  <h2 className="text-xl font-semibold text-white mb-2">Sem dados disponíveis</h2>
-                  <p className="text-gray-400 max-w-sm mb-4">
-                    Tente mudar o período de datas ou verifique o backend.
-                  </p>
-                </>
+                <h2 className={`text-xl font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>Sem dados disponíveis</h2>
               )}
             </div>
           )}

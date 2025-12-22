@@ -14,6 +14,7 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // --- HELPERS ---
 const findValue = (item, keys) => {
   if (!item) return 0;
+  if (!Array.isArray(keys)) keys = [keys]; // Garante array
   for (const key of keys) {
     if (item[key] !== undefined && item[key] !== null) return Number(item[key]);
   }
@@ -22,14 +23,17 @@ const findValue = (item, keys) => {
 
 const findDate = (item) => {
   if (!item) return null;
+  // Tenta pegar de várias chaves ou usa o próprio item se for string
+  if (typeof item === 'string') return item.split('T')[0];
   const candidates = [item.dt, item.period_date, item.PeriodDate, item.date, item.Date, item.day];
   for (const val of candidates) {
-    if (val && typeof val === 'string' && val.length >= 10) return val;
+    if (val && typeof val === 'string' && val.length >= 10) return val.split('T')[0];
   }
   return null;
 };
 
-// --- 1. LISTA DE AFILIADOS ---
+// --- ROTAS PADRÃO (LISTA E FINANCEIRO) ---
+// (Mantidas exatamente como você pediu)
 async function fetchAllProfiles() {
   let allProfiles = [];
   let start = 0;
@@ -120,14 +124,14 @@ app.get("/api/affiliates", async (req, res) => {
 });
 
 // =================================================================================
-// ROTA 2: JOGADORES (CORREÇÃO: PRIORIDADE ID EXTERNO)
+// ROTA 2: JOGADORES (RECONSTRUÇÃO VIA MEDIA REPORT - GARANTIA DE DADOS)
 // =================================================================================
 app.get("/api/affiliates/:id/players", async (req, res) => {
   try {
     const { id } = req.params;
     const { date_from, date_to } = req.query;
 
-    console.log(`\n👥 Filtrando jogadores EXCLUSIVOS do ID: ${id}...`);
+    console.log(`\n👥 Gerando Relatório Detalhado (ID: ${id})...`);
 
     const response = await axios.get(`${process.env.SMARTICO_BASE_URL}/api/af2_media_report_op`, {
       headers: { authorization: process.env.SMARTICO_API_KEY },
@@ -135,58 +139,52 @@ app.get("/api/affiliates/:id/players", async (req, res) => {
         date_from, 
         date_to,
         filter_affiliate_id: id, 
-        aggregation_period: "DAY", 
-        // Pede os dois IDs para podermos escolher
-        group_by: "affiliate_id,registration_id,ext_customer_id,day", 
-        limit: 2500
+        aggregation_period: "DAY",
+        group_by: "affiliate_id,registration_id,ext_customer_id,username,day", 
+        limit: 3000 
       }
     });
 
     const rawData = response.data.data || [];
-    console.log(`   -> Total bruto: ${rawData.length}`);
+    console.log(`   -> Atividades encontradas: ${rawData.length}`);
 
     const playersMap = {};
-    let blockedCount = 0;
 
     rawData.forEach(row => {
-      // 1. FILTRO DE SEGURANÇA (Mantido)
-      if (row.affiliate_id && String(row.affiliate_id) !== String(id)) {
-         blockedCount++;
-         return; 
-      }
+      if (row.affiliate_id && String(row.affiliate_id) !== String(id)) return;
 
-      // 2. CORREÇÃO CRÍTICA DO ID:
-      // Prioriza 'ext_customer_id' (ID do SeguroPlay). 
-      // Só usa 'registration_id' (ID Smartico) se o externo não existir.
       let displayId = row.ext_customer_id;
-      
-      // Se ext_customer_id for vazio, nulo ou '0', tenta o interno
       if (!displayId || displayId === "0" || displayId === "null" || displayId.trim() === "") {
-          displayId = row.registration_id;
+          displayId = row.registration_id; 
       }
-
-      // Se ainda assim não tiver ID, ignora
-      if (!displayId || displayId === "null" || displayId.trim() === "") return;
-
-      // 3. Filtro de Atividade
-      const regCount = findValue(row, ['registration_count', 'RegistrationCount']);
-      const ftdCount = findValue(row, ['ftd_count', 'FtdCount']);
-      const money = findValue(row, ['net_deposits', 'deposits', 'deposit_total', 'ftd_total']);
-
-      if (regCount === 0 && ftdCount === 0 && money === 0) return;
+      if (!displayId || displayId === "null") return; 
 
       if (!playersMap[displayId]) {
         playersMap[displayId] = {
-          playerId: displayId, // AGORA VAI APARECER O ID CERTO (75...)
+          playerId: displayId,
+          username: row.username || "-",
           country: row.country || "BR",
           registeredAt: null,
-          depositedAt: null,
-          ftdAmount: 0
+          ftdDate: null, 
+          ftdAmount: 0,
+          depositsCount: 0,
+          withdrawals: 0,
+          netPl: 0,
+          volume: 0,
+          qCpa: "Não"
         };
       }
 
       const p = playersMap[displayId];
       const currentDate = findDate(row);
+
+      const regCount = findValue(row, ['registration_count', 'RegistrationCount']);
+      const ftdCount = findValue(row, ['ftd_count', 'FtdCount']);
+      const deposits = findValue(row, ['deposit_total', 'deposits']);
+      const depCount = findValue(row, ['deposit_count']);
+      const withdraw = findValue(row, ['withdrawal_total', 'withdrawals']);
+      const pl = findValue(row, ['net_pl', 'net_pl_casino', 'net_pl_sport']);
+      const vol = findValue(row, ['volume', 'turnover']); 
 
       if (currentDate) {
         if (regCount > 0) {
@@ -194,29 +192,32 @@ app.get("/api/affiliates/:id/players", async (req, res) => {
             p.registeredAt = currentDate;
           }
         }
-        if (ftdCount > 0 || money > 0) {
-          if (!p.depositedAt || new Date(currentDate) < new Date(p.depositedAt)) {
-            p.depositedAt = currentDate;
-            if (money > 0) p.ftdAmount = money;
-            else if (ftdCount > 0 && p.ftdAmount === 0) p.ftdAmount = 10; 
+        if (ftdCount > 0) {
+          if (!p.ftdDate || new Date(currentDate) < new Date(p.ftdDate)) {
+            p.ftdDate = currentDate;
+            if (p.ftdAmount === 0) p.ftdAmount = deposits || 10; 
           }
         }
       }
+
+      p.depositsCount += depCount;
+      p.withdrawals += withdraw;
+      p.netPl += pl;
+      p.volume += vol;
+
+      if (p.ftdDate) p.qCpa = "Sim";
     });
 
     const list = Object.values(playersMap);
-    
-    // Filtro Final
-    const finalList = list.filter(p => p.registeredAt || p.depositedAt);
+    const finalList = list.filter(p => p.registeredAt || p.ftdDate || p.netPl !== 0 || p.depositsCount > 0);
 
     finalList.sort((a,b) => {
-        const da = new Date(a.registeredAt || a.depositedAt || 0);
-        const db = new Date(b.registeredAt || b.depositedAt || 0);
+        const da = new Date(a.registeredAt || a.ftdDate || 0);
+        const db = new Date(b.registeredAt || b.ftdDate || 0);
         return db - da;
     });
 
-    console.log(`   ⛔ Bloqueados: ${blockedCount}`);
-    console.log(`   ✅ Jogadores Finais (IDs Corrigidos): ${finalList.length}`);
+    console.log(`   ✅ Relatório Reconstruído: ${finalList.length} jogadores.`);
     res.json({ players: finalList });
 
   } catch (error) {
@@ -225,44 +226,106 @@ app.get("/api/affiliates/:id/players", async (req, res) => {
   }
 });
 
-// --- OUTRAS ROTAS ---
+// =================================================================================
+// ROTA 3: HISTÓRICO DE AFILIADO (GRÁFICOS CORRIGIDOS)
+// =================================================================================
 app.get("/api/affiliates/:id/history", async (req, res) => {
   try {
     const { id } = req.params;
     const { date_from, date_to } = req.query;
+    
+    // Filtro específico para garantir que só vem dados deste ID
     const response = await axios.get(`${process.env.SMARTICO_BASE_URL}/api/af2_media_report_op`, {
       headers: { authorization: process.env.SMARTICO_API_KEY },
-      params: { aggregation_period: "DAY", group_by: "day", filter_affiliate_id: id, date_from, date_to }
+      params: { 
+        aggregation_period: "DAY", 
+        group_by: "day,affiliate_id", // Agrupa também por ID para evitar mistura
+        filter_affiliate_id: id, 
+        date_from, 
+        date_to 
+      }
     });
+    
     const rawData = response.data.data || [];
-    const history = rawData.map(item => ({
-      name: findDate(item),
-      registrations: findValue(item, ['registration_count', 'RegistrationCount']),
-      ftds: findValue(item, ['ftd_count', 'FtdCount']),
-      commission: findValue(item, ['commissions_total', 'CommissionsTotal']),
-      net_pnl: findValue(item, ['net_pl', 'NetPL'])
-    }));
+    
+    // --- AGREGAÇÃO POR DATA (A Correção) ---
+    // A API pode mandar múltiplas linhas para o mesmo dia (ex: 1 linha pra BR, 1 pra PT).
+    // O código anterior só mapeava, criando pontos duplicados no gráfico.
+    // Aqui nós SOMAMOS tudo por dia.
+    const dailyMap = {};
+
+    rawData.forEach(item => {
+      // Garante que é o afiliado certo
+      if (String(item.affiliate_id) !== String(id)) return;
+
+      const date = findDate(item);
+      if (!date) return;
+
+      if (!dailyMap[date]) {
+        dailyMap[date] = { 
+          name: date, 
+          registrations: 0, ftds: 0, commission: 0, net_pnl: 0 
+        };
+      }
+
+      dailyMap[date].registrations += findValue(item, ['registration_count', 'RegistrationCount']);
+      dailyMap[date].ftds += findValue(item, ['ftd_count', 'FtdCount']);
+      dailyMap[date].commission += findValue(item, ['commissions_total', 'CommissionsTotal']);
+      dailyMap[date].net_pnl += findValue(item, ['net_pl', 'NetPL']);
+    });
+
+    // Converte o mapa de volta para lista e ordena por data
+    const history = Object.values(dailyMap).sort((a, b) => new Date(a.name) - new Date(b.name));
+    
     res.json({ history });
   } catch (e) { res.json({ history: [] }); }
 });
 
+// =================================================================================
+// ROTA 4: HISTÓRICO GERAL (VISÃO GERAL CORRIGIDA)
+// =================================================================================
 app.get("/api/overview/history", async (req, res) => {
   try {
     const response = await axios.get(`${process.env.SMARTICO_BASE_URL}/api/af2_media_report_op`, {
       headers: { authorization: process.env.SMARTICO_API_KEY },
-      params: { aggregation_period: "DAY", group_by: "day", date_from: req.query.date_from, date_to: req.query.date_to }
+      params: { 
+        aggregation_period: "DAY", 
+        group_by: "day", 
+        date_from: req.query.date_from, 
+        date_to: req.query.date_to 
+      }
     });
+    
     const rawData = response.data.data || [];
-    const history = rawData.map(item => ({
-      name: findDate(item),
-      registrations: findValue(item, ['registration_count', 'RegistrationCount']),
-      ftds: findValue(item, ['ftd_count', 'FtdCount']),
-      commission: findValue(item, ['commissions_total', 'CommissionsTotal']),
-      net_pnl: findValue(item, ['net_pl', 'NetPL'])
-    }));
+    
+    // --- AGREGAÇÃO GERAL ---
+    const dailyMap = {};
+
+    rawData.forEach(item => {
+      // Ignora o afiliado default para não distorcer o gráfico geral
+      if (item.affiliate_id === 468904) return;
+
+      const date = findDate(item);
+      if (!date) return;
+
+      if (!dailyMap[date]) {
+        dailyMap[date] = { 
+          name: date, 
+          registrations: 0, ftds: 0, commission: 0, net_pnl: 0 
+        };
+      }
+
+      dailyMap[date].registrations += findValue(item, ['registration_count', 'RegistrationCount']);
+      dailyMap[date].ftds += findValue(item, ['ftd_count', 'FtdCount']);
+      dailyMap[date].commission += findValue(item, ['commissions_total', 'CommissionsTotal']);
+      dailyMap[date].net_pnl += findValue(item, ['net_pl', 'NetPL']);
+    });
+
+    const history = Object.values(dailyMap).sort((a, b) => new Date(a.name) - new Date(b.name));
+    
     res.json({ history });
   } catch (e) { res.json({ history: [] }); }
 });
 
 const PORT = 3333;
-app.listen(PORT, () => console.log(`🚀 Backend (Correção ID Externo) rodando em http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Backend (Com Gráficos Corrigidos) rodando em http://localhost:${PORT}`));
