@@ -13,8 +13,15 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [apiStatus, setApiStatus] = useState("idle");
   
-  // --- NOVO: ESTADO GLOBAL DO TEMA ---
+  // --- ESTADO GLOBAL DO TEMA ---
   const [isDarkMode, setIsDarkMode] = useState(true);
+
+  // --- CONFIGURAÇÃO DE URL (LOCAL vs PRODUÇÃO) ---
+  // Se for fazer deploy, troque a string vazia pela URL do Render
+  // Exemplo: "https://backend-smartico.onrender.com"
+  const API_BASE = import.meta.env.PROD 
+    ? "https://backend-seguroplay.onrender.com" 
+    : ""; // Localmente usa o proxy do Vite (/api)
 
   // Estado Global de Datas
   const [dateRange, setDateRange] = useState(() => {
@@ -33,7 +40,10 @@ export default function App() {
       const qFrom = from || dateRange.from;
       const qTo = to || dateRange.to;
 
-      const response = await fetch(`/api/affiliates?date_from=${qFrom}&date_to=${qTo}`);
+      // Usa API_BASE para garantir que funciona online e offline
+      const url = `${API_BASE}/api/affiliates?date_from=${qFrom}&date_to=${qTo}`;
+      
+      const response = await fetch(url);
       if (!response.ok) throw new Error("Falha na conexão");
       const data = await response.json();
 
@@ -70,7 +80,6 @@ export default function App() {
           dateFrom={dateRange.from} 
           dateTo={dateRange.to}
           onBack={() => setSelectedAffiliate(null)}
-          // PASSAMOS O TEMA PARA O DETALHE
           isDarkMode={isDarkMode}
         />
       );
@@ -90,7 +99,6 @@ export default function App() {
   };
 
   return (
-    // PASSAMOS O TEMA PARA O LAYOUT
     <Layout 
       activeTab={activeTab} 
       onTabChange={(tab) => { setActiveTab(tab); setSelectedAffiliate(null); }}
@@ -117,7 +125,7 @@ export default function App() {
               initialDateFrom={dateRange.from}
               initialDateTo={dateRange.to}
               onFilter={(from, to) => loadFromApi(from, to)}
-              isDarkMode={isDarkMode} // Se precisar passar estilo
+              isDarkMode={isDarkMode} 
             />
             <FileUploader onLoad={(data) => { setRows(data); setApiStatus("manual"); setActiveTab("overview"); }} />
           </div>
