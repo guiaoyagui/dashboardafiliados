@@ -1,16 +1,78 @@
-# React + Vite
+# 📊 Dashboard de Afiliados
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Dashboard web desenvolvido para visualização, gestão e análise de dados de afiliados, com integração backend via API e foco em performance, escalabilidade e experiência do usuário.
 
-Currently, two official plugins are available:
+O sistema consome dados externos por meio da **API da Smartico**, processa essas informações no backend e apresenta métricas em tempo real no frontend.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## React Compiler
+## 🚀 Funcionalidades
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- 📈 Visualização de métricas de afiliados
+- 🔗 Integração com API externa (Smartico)
+- 🧠 Processamento e normalização de dados no backend
+- 🔐 Comunicação segura entre frontend e backend
+- ⚡ Interface moderna e responsiva
+- 🌍 Aplicação em produção (deploy online)
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 🧱 Arquitetura
+
+- **Backend**: Node.js + TypeScript  
+- **API**: Integração REST com Smartico  
+- **Frontend**: Tailwind CSS  
+- **Deploy**:
+  - Backend hospedado no **Render**
+  - Frontend hospedado na **Vercel**
+
+---
+
+## 🛠️ Tecnologias Utilizadas
+
+- Node.js
+- TypeScript
+- Tailwind CSS
+- API REST
+- Integração com Smartico
+- Render
+- Vercel
+
+---
+
+## 🌐 Deploy
+
+- 🔗 Frontend: https://dashboardafiliados.vercel.app  
+- 🔗 Backend: https://dashboardafiliados.onrender.com  
+
+> ⚠️ URLs podem exigir autenticação dependendo do ambiente.
+
+---
+
+## 📌 Destaques Técnicos
+
+- Estrutura modular e organizada
+- Separação clara entre lógica de negócio e apresentação
+- Boas práticas de consumo de APIs externas
+- Tratamento de erros e respostas assíncronas
+- Código tipado com TypeScript para maior segurança
+
+---
+
+## 📚 Aprendizados
+
+- Integração de sistemas via API
+- Deploy fullstack em ambientes cloud
+- Gerenciamento de variáveis de ambiente
+- Comunicação backend ↔ frontend
+- Organização de projetos em produção
+
+---
+
+## 👨‍💻 Autor
+
+**Guilherme Aoyagui Ide**  
+Estudante de Ciência da Computação  
+📍 Uberlândia - MG  
+
+🔗 GitHub: https://github.com/guiaoyagui
